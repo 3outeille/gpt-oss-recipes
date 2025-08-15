@@ -30,7 +30,7 @@ def create_config():
 
     if args.lora:
         name_parts.append("lora")
-        config_data["use_lora"] = True
+        # Force peft by default to be true
 
     if args.megablocks:
         name_parts.append("megablocks")

@@ -36,3 +36,5 @@ run_name: no-name
 report_to:
 - wandb
 seed: 42
+wandb_project: oai-3outeille
+wandb_entity: huggingface

@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 from dataclasses import dataclass, field
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, Mxfp4Config
@@ -19,7 +20,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, Mxfp4Config
 from trl import (
     ModelConfig as TrlModelConfig,
     ScriptArguments,
-    SFTConfig,
+    SFTConfig as TrlSFTConfig,
     SFTTrainer,
     TrlParser,
     get_peft_config,
@@ -27,13 +28,13 @@ from trl import (
 
 @dataclass
 class ModelConfig(TrlModelConfig):
-    """
-    ModelConfig wraps all arguments related to the model loading and quantization.
-    """
-
     use_kernels: bool = field(default=False, metadata={"help": "Enable/disable kernels"})
     use_tp: bool = field(default=False, metadata={"help": "Alias for tp to handle --use_tp flag."})
 
+@dataclass
+class SFTConfig(TrlSFTConfig):
+    wandb_project: str = field(default="oai-3outeille", metadata={"help": "Wandb project name."})
+    wandb_entity: str = field(default="huggingface", metadata={"help": "Wandb entity name."})
 
 def main(script_args, training_args, model_args):
     # ------------------------
@@ -93,4 +94,9 @@ if __name__ == "__main__":
     script_args, training_args, model_args, _ = parser.parse_args_and_config(
         return_remaining_strings=True
     )
+
+    if "wandb" in training_args.report_to:
+        os.environ["WANDB_PROJECT"] = training_args.wandb_project
+        os.environ["WANDB_ENTITY"] = training_args.wandb_entity
+
     main(script_args, training_args, model_args)

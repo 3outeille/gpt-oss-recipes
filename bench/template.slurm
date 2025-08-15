@@ -1,11 +1,14 @@
 #!/bin/bash
 #SBATCH --job-name=bench-gpt-oss-20b
-#SBATCH --time=00:30:00
+#SBATCH --time=02:30:00
 #SBATCH --partition=hopper-prod
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:8
 #SBATCH --ntasks-per-node=1
 #SBATCH --exclusive
+#SBATCH --qos=high
+#SBATCH --output=/dev/null
+#SBATCH --error=/dev/null
 
 # Example of running the job:
 # sbatch template.slurm configs/tp_lora_megablocks_flash.yaml
@@ -36,6 +39,8 @@ if [ -z "$CONFIG_FILE" ]; then
   echo "Usage: sbatch $0 <config_file>"
   exit 1
 fi
+
+export CMD="accelerate launch finetune.py --config $CONFIG_FILE"
 
 # Derive log file name from config file
 LOG_BASENAME=$(basename "$CONFIG_FILE" .yaml)
