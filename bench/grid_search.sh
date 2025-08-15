@@ -10,7 +10,7 @@
 python create_config.py --zero3 --lora
 sbatch template.slurm configs/zero3_lora.yaml
 
-# EP + lora
+# TP + lora
 python create_config.py --tp --lora
 sbatch template.slurm configs/tp_lora.yaml
 
@@ -18,7 +18,7 @@ sbatch template.slurm configs/tp_lora.yaml
 python create_config.py --zero3 --lora --megablocks
 sbatch template.slurm configs/zero3_lora_megablocks.yaml
 
-# EP + lora + megablocks
+# TP + lora + megablocks
 python create_config.py --tp --lora --megablocks
 sbatch template.slurm configs/tp_lora_megablocks.yaml
 
@@ -26,6 +26,6 @@ sbatch template.slurm configs/tp_lora_megablocks.yaml
 python create_config.py --zero3 --lora --megablocks --flash
 sbatch template.slurm configs/zero3_lora_megablocks_flash.yaml
 
-# EP + lora + megablocks + flash
+# TP + lora + megablocks + flash
 python create_config.py --tp --lora --megablocks --flash
 sbatch template.slurm configs/tp_lora_megablocks_flash.yaml
