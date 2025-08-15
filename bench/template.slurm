@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=profiling-oai
+#SBATCH --job-name=bench-gpt-oss-20b
 #SBATCH --time=00:30:00
 #SBATCH --partition=hopper-prod
 #SBATCH --nodes=1
@@ -39,9 +39,8 @@ fi
 
 # Derive log file name from config file
 LOG_BASENAME=$(basename "$CONFIG_FILE" .yaml)
-LOG_FILE="${LOG_BASENAME}.out"
-
-export CMD="accelerate launch finetune.py --config $CONFIG_FILE"
+JOB_ID=${SLURM_JOB_ID}
+LOG_FILE="${LOG_BASENAME}_${JOB_ID}.out"
 
 # srun error handling:
 # --wait=60: wait 60 sec after the first task terminates before terminating all remaining tasks

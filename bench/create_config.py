@@ -6,7 +6,7 @@ def create_config():
     parser = argparse.ArgumentParser(description="Create YAML configuration files for benchmarking.")
     parser.add_argument("--zero3", action="store_true", help="Flag for Zero3.")
     parser.add_argument("--tp", action="store_true", help="Flag for EP.")
-    parser.add_argument("--peft", action="store_true", help="Flag for PEFT.")
+    parser.add_argument("--lora", action="store_true", help="Flag for lora.")
     parser.add_argument("--megablocks", action="store_true", help="Flag for Megablocks.")
     parser.add_argument("--flash", action="store_true", help="Flag for Flash Attention.")
     args = parser.parse_args()
@@ -28,9 +28,9 @@ def create_config():
         name_parts.append("tp")
         config_data["use_tp"] = True
 
-    if args.peft:
+    if args.lora:
         name_parts.append("lora")
-        config_data["use_peft"] = True
+        config_data["use_lora"] = True
 
     if args.megablocks:
         name_parts.append("megablocks")

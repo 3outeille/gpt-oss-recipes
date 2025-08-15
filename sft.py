@@ -66,6 +66,8 @@ def main(script_args, training_args, model_args):
     # -------------
     # Train model
     # -------------
+    training_args.report_to = "wandb"
+
     trainer = SFTTrainer(
         model=model,
         args=training_args,

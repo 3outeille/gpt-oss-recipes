@@ -6,20 +6,26 @@
 # 2) memory usage
 # 3) max for 300 steps
 
-# Zero3 + Peft
-python create_config.py --zero3 --peft
+# Zero3 + lora
+python create_config.py --zero3 --lora
+sbatch template.slurm configs/zero3_lora.yaml
 
-# EP + Peft
-python create_config.py --tp --peft
+# EP + lora
+python create_config.py --tp --lora
+sbatch template.slurm configs/tp_lora.yaml
 
-# Zero3 + Peft + megablocks
-python create_config.py --zero3 --peft --megablocks
+# Zero3 + lora + megablocks
+python create_config.py --zero3 --lora --megablocks
+sbatch template.slurm configs/zero3_lora_megablocks.yaml
 
-# EP + Peft + megablocks
-python create_config.py --tp --peft --megablocks
+# EP + lora + megablocks
+python create_config.py --tp --lora --megablocks
+sbatch template.slurm configs/tp_lora_megablocks.yaml
 
-# Zero3 + Peft + megablocks + flash
-python create_config.py --zero3 --peft --megablocks --flash
+# Zero3 + lora + megablocks + flash
+python create_config.py --zero3 --lora --megablocks --flash
+sbatch template.slurm configs/zero3_lora_megablocks_flash.yaml
 
-# EP + Peft + megablocks + flash
-python create_config.py --tp --peft --megablocks --flash
+# EP + lora + megablocks + flash
+python create_config.py --tp --lora --megablocks --flash
+sbatch template.slurm configs/tp_lora_megablocks_flash.yaml
