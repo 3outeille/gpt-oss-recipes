@@ -211,7 +211,8 @@ def main(script_args, training_args, model_args):
     model = AutoModelForCausalLM.from_pretrained(
         model_args.model_name_or_path, **model_kwargs
     )
-    model = kernelize(model, mode=Mode.TRAINING)
+    if model_args.use_kernels:
+        model = kernelize(model, mode=Mode.TRAINING)
 
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.model_name_or_path,
