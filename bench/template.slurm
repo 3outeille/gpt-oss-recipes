@@ -41,7 +41,7 @@ if [ -z "$CONFIG_FILE" ]; then
 fi
 
 if [[ "$CONFIG_FILE" == *zero* ]]; then
-  export CMD="accelerate launch --config zero3.yaml finetune.py --config $CONFIG_FILE"
+  export CMD="accelerate launch --config_file zero3.yaml finetune.py --config $CONFIG_FILE"
 else
   export CMD="accelerate launch finetune.py --config $CONFIG_FILE"
 fi
