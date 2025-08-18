@@ -20,7 +20,10 @@ import logging
 from dataclasses import dataclass, field
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, Mxfp4Config
+from kernels import kernelize, Mode
 from transformers.trainer_callback import TrainerCallback
+import torch
+from torch.profiler import ProfilerActivity, tensorboard_trace_handler, schedule
 
 from trl import (
     ModelConfig as TrlModelConfig,
@@ -169,6 +172,13 @@ class MfuMetricsCallback(TrainerCallback):
         self.last_time = current_time
         self.last_num_tokens = logs["num_tokens"]
 
+class ProfCallback(TrainerCallback):
+    def __init__(self, prof):
+        self.prof = prof
+
+    def on_step_end(self, args, state, control, **kwargs):
+        if dist.get_rank() == 0:
+            self.prof.step()
 
 @dataclass
 class ModelConfig(TrlModelConfig):
@@ -201,6 +211,7 @@ def main(script_args, training_args, model_args):
     model = AutoModelForCausalLM.from_pretrained(
         model_args.model_name_or_path, **model_kwargs
     )
+    model = kernelize(model, mode=Mode.TRAINING)
 
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.model_name_or_path,
@@ -229,7 +240,22 @@ def main(script_args, training_args, model_args):
         ]
     )
 
-    trainer.train()
+    with torch.profiler.profile(activities=[ProfilerActivity.CPU,
+                                            ProfilerActivity.CUDA], 
+                                schedule=schedule(skip_first=0, wait=5, warmup=2, active=2, repeat=1),
+                                # - No skip (skip_first=0)
+                                # - Iteration 1-5: Wait (wait=5)
+                                # - Iteration 5-6: Warmup (warmup=2)
+                                # - Iterations 7-8-9: Active profiling (active=3)
+                                # - After iteration 9: Profiling complete (repeat=1), so it will not start a new cycle after the 6th iteration.
+                                on_trace_ready=tensorboard_trace_handler(dir_name=f"./profiler", worker_name=f"worker_{dist.get_rank()}"),
+                                profile_memory=True,
+                                with_stack=True,
+                                record_shapes=True,) as prof:
+
+        # trainer.add_callback(ProfCallback(prof=prof))       
+        trainer.train()
+    
     trainer.save_model(training_args.output_dir)
     if training_args.push_to_hub:
         trainer.push_to_hub(dataset_name=script_args.dataset_name)
