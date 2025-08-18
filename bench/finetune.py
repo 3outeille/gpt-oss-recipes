@@ -13,9 +13,14 @@
 # limitations under the License.
 
 import os
+import time
+import torch.distributed as dist
+import torch.nn as nn
+import logging
 from dataclasses import dataclass, field
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, Mxfp4Config
+from transformers.trainer_callback import TrainerCallback
 
 from trl import (
     ModelConfig as TrlModelConfig,
@@ -25,6 +30,145 @@ from trl import (
     TrlParser,
     get_peft_config,
 )
+
+class TokenMetricsCallback(TrainerCallback):
+    """
+    A `TrainerCallback` that computes and logs the tokens per second and tokens per second per GPU.
+    """
+
+    def __init__(self):
+        self.last_time = None
+        self.last_num_tokens = 0
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if not state.is_world_process_zero or logs is None or "num_tokens" not in logs:
+            return
+
+        current_time = time.time()
+
+        # On the first log, just record the state and return
+        if self.last_time is None:
+            self.last_time = current_time
+            self.last_num_tokens = logs["num_tokens"]
+            return
+
+        time_delta = current_time - self.last_time
+        tokens_delta = logs["num_tokens"] - self.last_num_tokens
+
+        if time_delta > 0:
+            tokens_per_sec = tokens_delta / time_delta
+            tokens_per_sec_per_gpu = tokens_per_sec / dist.get_world_size()
+
+            logs["tokens_per_sec"] = round(tokens_per_sec, 2)
+            logs["tokens_per_sec_per_gpu"] = round(tokens_per_sec_per_gpu, 2)
+
+        self.last_time = current_time
+        self.last_num_tokens = logs["num_tokens"]
+
+
+class MfuMetricsCallback(TrainerCallback):
+    """
+    A `TrainerCallback` that computes and logs the memory usage.
+    """
+
+    def __init__(self):
+        # Source: https://github.com/pytorch/torchtitan/pull/1559/files#diff-871c1e4f538476256309628f6be55a8b6fa474e7e29fc95f5154e5095fdd6e3fR88
+        self.last_time = None
+        self.last_num_tokens = 0
+        self.nparams = 0
+        self.num_flops_per_token = 0
+
+    def on_train_begin(self, args, state, control, model=None, **kwargs):
+        if model is None:
+            return
+        # `model` is the PeftModel, we need the underlying base model
+        if hasattr(model, "model"):
+            model = model.model
+        config = model.config
+
+        self.num_experts_per_tok = getattr(config, "num_experts_per_tok", 0)
+        self.num_local_experts = getattr(config, "num_local_experts", 1)  # Non-moe models have 1 expert.
+        self.num_hidden_layers = config.num_hidden_layers
+        self.num_attention_heads = config.num_attention_heads
+        self.hidden_size = config.hidden_size
+        self.seq_len = config.initial_context_length
+
+        self.nparams, self.num_flops_per_token = self.get_nparams_and_flops(model)
+        # https://github.com/stanford-cs336/spring2024-lectures/blob/main/lecture_02.py#L950
+        self.theoretical_flops = 989.5 * 10 ** 12
+
+    def get_nparams_and_flops(self, model: nn.Module) -> tuple[int, int]:
+        """
+        Adopted from llama4 implementation.
+        """
+        nparams_embedding = 0
+        nparams_moe_router = 0
+        nparams_shared_expert = 0
+        nparams_experts = 0
+        nparams_dense = 0
+
+        for name, p in model.named_parameters():
+            if "embedding" in name:
+                nparams_embedding += p.numel()
+                nparams_dense += p.numel()
+            elif "moe.shared_expert" in name:
+                nparams_shared_expert += p.numel()
+            elif "moe.router" in name:
+                nparams_moe_router += p.numel()
+            elif "moe.experts" in name:
+                nparams_experts += p.numel()
+            else:
+                nparams_dense += p.numel()
+
+        nparams_sparse = nparams_moe_router + nparams_shared_expert + nparams_experts
+        nparams = nparams_dense + nparams_sparse
+        nparams_sparse_active = (
+            nparams_moe_router
+            + nparams_shared_expert
+            + nparams_experts * self.num_experts_per_tok // self.num_local_experts
+        )
+
+        l, h, q, t = (
+            self.num_hidden_layers,
+            self.num_attention_heads,
+            self.hidden_size // self.num_attention_heads,
+            self.seq_len,
+        )
+        # Reasoning behind the factor of 12 for the self-attention part of the formula:
+        # 1. each self-attention has 2 matmul in the forward and 4 in the backward (6)
+        # 2. the flash attention does 1 more matmul recomputation in the backward
+        #    but recomputation should not be counted in calculating MFU           (+0)
+        # 3. each matmul performs 1 multiplication and 1 addition                 (*2)
+        # 4. we follow the convention and do not account for sparsity in causal attention
+        num_flops_per_token = 6 * (nparams_dense - nparams_embedding + nparams_sparse_active) + 12 * l * h * q * t
+
+        return nparams, num_flops_per_token
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if not state.is_world_process_zero or logs is None or "num_tokens" not in logs:
+            return
+
+        current_time = time.time()
+
+        # On the first log, just record the state and return
+        if self.last_time is None:
+            self.last_time = current_time
+            self.last_num_tokens = logs["num_tokens"]
+            return
+
+        time_delta = current_time - self.last_time
+        tokens_delta = logs["num_tokens"] - self.last_num_tokens
+
+        if time_delta > 0:
+            tokens_per_sec = tokens_delta / time_delta
+            tokens_per_sec_per_gpu = tokens_per_sec / dist.get_world_size()
+
+            achieved_mfu = (tokens_per_sec_per_gpu * self.num_flops_per_token) / self.theoretical_flops
+            logs["mfu"] = round(achieved_mfu * 100, 2)
+
+        self.last_time = current_time
+        self.last_num_tokens = logs["num_tokens"]
+
 
 @dataclass
 class ModelConfig(TrlModelConfig):
@@ -53,8 +197,6 @@ def main(script_args, training_args, model_args):
 
     if model_args.use_tp:
         model_kwargs["tp_plan"] = "auto"
-    else:
-        model_kwargs["device_map"] = "auto"
 
     model = AutoModelForCausalLM.from_pretrained(
         model_args.model_name_or_path, **model_kwargs
@@ -81,6 +223,10 @@ def main(script_args, training_args, model_args):
         train_dataset=dataset,
         processing_class=tokenizer,
         peft_config=get_peft_config(model_args) if model_args.use_peft else None,
+        callbacks=[
+            TokenMetricsCallback(),
+            MfuMetricsCallback(),
+        ]
     )
 
     trainer.train()
