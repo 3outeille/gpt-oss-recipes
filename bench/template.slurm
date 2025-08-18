@@ -40,7 +40,11 @@ if [ -z "$CONFIG_FILE" ]; then
   exit 1
 fi
 
-export CMD="accelerate launch finetune.py --config $CONFIG_FILE"
+if [[ "$CONFIG_FILE" == *zero* ]]; then
+  export CMD="accelerate launch --config zero3.yaml finetune.py --config $CONFIG_FILE"
+else
+  export CMD="accelerate launch finetune.py --config $CONFIG_FILE"
+fi
 
 # Derive log file name from config file
 LOG_BASENAME=$(basename "$CONFIG_FILE" .yaml)
