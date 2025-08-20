@@ -212,6 +212,7 @@ def main(script_args, training_args, model_args):
         model_args.model_name_or_path, **model_kwargs
     )
     if model_args.use_kernels:
+        print("Kernelizing model...")
         model = kernelize(model, mode=Mode.TRAINING)
 
     tokenizer = AutoTokenizer.from_pretrained(
