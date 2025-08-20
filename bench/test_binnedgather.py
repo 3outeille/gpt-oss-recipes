@@ -69,7 +69,9 @@ def _binned_copy(
     # do the reduce step in a second kernel.
     offset = index_a // TOP_K if A_TO_B else index_a
     a += tl.multiple_of(offset * NUM_COLUMNS, NUM_COLUMNS)
-    b += tl.multiple_of(index_b * NUM_COLUMNS, NUM_COLUMNS)
+    # Cast index_b to 64-bit before multiplying to prevent overflow on large tensors.
+    # Otherwise The multiplication index_b * NUM_COLUMNS is performed using 32-bit integers, and the result overflows
+    b += tl.multiple_of(index_b.to(tl.int64) * NUM_COLUMNS, NUM_COLUMNS)
     offsets = tl.max_contiguous(tl.arange(0, BLOCK_X), BLOCK_X)
 
     # Load the scale, if requested.
@@ -187,8 +189,8 @@ if __name__ == "__main__":
     
     num_tokens = 4096
     hidden_size = 2880
-    num_experts = 16 # <= 2^31-1
-    expert_capacity = 400 # <= 65535
+    num_experts = 32 # <= 2^31-1
+    expert_capacity = 65535 # <= 65535
     top_k = 4
     
     x = torch.randn(
