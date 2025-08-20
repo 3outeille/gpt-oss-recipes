@@ -161,9 +161,9 @@ def test_binned_gather(seq_len: int, hidden_size: int, num_experts: int, top_k: 
     # Randomly assign tokens to experts.
     top_expert = torch.randint(0, num_experts, (seq_len * top_k,), device='cuda', dtype=torch.int)
     _, indices = torch.sort(top_expert)
-    bins = torch.cumsum(torch.bincount(top_expert, minlength=num_experts), 0)
+    bins = torch.cumsum(torch.bincount(top_expert, minlength=num_experts), 0).to(torch.int32)
 
-    def binned_gather(
+    def binned_gather_pytorch(
         x: torch.Tensor,
         indices: torch.Tensor,
         weights: torch.Tensor,
@@ -185,5 +185,5 @@ def test_binned_gather(seq_len: int, hidden_size: int, num_experts: int, top_k: 
         return out
 
     out = binned_gather(x, indices, None, bins, expert_capacity, top_k)
-    expected_out = binned_gather(x, indices, None, bins, expert_capacity, top_k)
+    expected_out = binned_gather_pytorch(x, indices, None, bins, expert_capacity, top_k)
     assert torch.all(torch.eq(out, expected_out))
