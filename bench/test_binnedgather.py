@@ -2,6 +2,7 @@ import torch
 import triton
 import triton.language as tl
 import lovely_tensors as lt; lt.monkey_patch()
+import pytest
 
 def assert_is_matrix(x):
     if x.ndim != 2:
@@ -41,11 +42,11 @@ def _binned_copy(
     SCALE: tl.constexpr,
 ):
     # Load our indices into the output.
-    expert_idx = tl.program_id(0)
-    entry_idx = tl.program_id(1)
+    expert_idx = tl.program_id(1)
+    entry_idx = tl.program_id(0)
 
     # Calculate our offset into the output.
-    index_b = expert_idx * expert_capacity + entry_idx
+    index_b = entry_idx * num_experts + expert_idx
 
     # Load the index bounds for our bin and calculate
     # the number of tokens assigned to our expert.
@@ -105,9 +106,9 @@ def binned_gather(x, indices, weights, bins, expert_capacity, top_k):
         assert_equal(weights.shape[0], x.shape[0] * top_k)
 
     num_experts = bins.shape[0]
-    out = torch.zeros((num_experts, expert_capacity, x.shape[1]), dtype=x.dtype, device=x.device)
+    out = torch.zeros((expert_capacity, num_experts, x.shape[1]), dtype=x.dtype, device=x.device)
 
-    _binned_copy[(num_experts, expert_capacity)](
+    _binned_copy[(expert_capacity, num_experts)](
         x,
         out,
         num_experts,
@@ -120,6 +121,8 @@ def binned_gather(x, indices, weights, bins, expert_capacity, top_k):
         TOP_K=top_k,
         SCALE=weights is not None,
     )
+
+    out = out.transpose(0, 1)
     return out
 
 
@@ -178,25 +181,18 @@ def binned_gather_pytorch(x, indices, weights, bins, expert_capacity, top_k):
 
     return out
 
-if __name__ == "__main__":
-    # Create tensors with shapes and dtypes from the image.
-    # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#features-and-technical-specifications
-    # num_tokens = 10
-    # hidden_size = 4
-    # num_experts = 3 # <= 2^31-1
-    # expert_capacity = 5 # <= 65535
-    # top_k = 2
-    
-    num_tokens = 4096
-    hidden_size = 2880
-    num_experts = 32 # <= 2^31-1
-    expert_capacity = 65535 # <= 65535
-    top_k = 4
-    
+@pytest.mark.parametrize("num_tokens", [16, 128, 1024, 4096])
+@pytest.mark.parametrize("hidden_size", [8, 64, 512, 2880])
+@pytest.mark.parametrize("num_experts", [2, 8, 32])
+@pytest.mark.parametrize("expert_capacity", [4, 16, 128, 1024, 65536])
+@pytest.mark.parametrize("top_k", [1, 2, 4])
+def test(num_tokens, hidden_size, num_experts, expert_capacity, top_k):
+
+    # Some tests will fail with OOM but that's because allocated tensors are too large.
+    # This is not a problem with the kernel in itself.
     x = torch.randn(
         (num_tokens, hidden_size), dtype=torch.bfloat16, device='cuda')
 
-    # For this test, we can use a simple range for indices.
     indices = torch.arange(num_tokens * top_k, dtype=torch.int32, device='cuda')
 
     counts = torch.randint(0, expert_capacity, (num_experts,), device='cuda')
@@ -206,11 +202,7 @@ if __name__ == "__main__":
     counts[0] += diff
     bins = torch.cumsum(counts, dim=0, dtype=torch.int32).cuda()
 
-    # Example: counts is [12, 2, 3], the bins tensor will be [12, 14, 20]. This tells the gather function:
-    # Expert 0's assignments are in indices[0:12].
-    # Expert 1's assignments are in indices[12:14].
-    # Expert 2's assignments are in indices[14:20]. (we have num_tokens * 3)
-
+    print(f"\nGridsearch: num_tokens={num_tokens}, hidden_size={hidden_size}, num_experts={num_experts}, expert_capacity={expert_capacity}, top_k={top_k}")
     print("Created tensors with shapes:")
     print(f"x: {x.shape}, dtype: {x.dtype}")
     print(f"indices: {indices.shape}, dtype: {indices.dtype}")
@@ -218,15 +210,18 @@ if __name__ == "__main__":
     print(f"expert_capacity: {expert_capacity}")
 
     output_pytorch = binned_gather_pytorch(x, indices, None, bins, expert_capacity, top_k)
-
     output_triton = binned_gather(x, indices, None, bins, expert_capacity, top_k)
 
     print("\nComparing Triton kernel output to PyTorch baseline...")
-    if torch.allclose(output_triton, output_pytorch, atol=1e-2, rtol=1e-2):
-        print("✅ Success: Outputs match!")
-    else:
-        print("❌ Failure: Outputs do not match.")
-        print("Difference:", torch.abs(output_triton - output_pytorch).max())
+    assert torch.allclose(output_triton, output_pytorch, atol=1e-2, rtol=1e-2), (
+        "❌ Failure: Outputs do not match. "
+        f"Difference: {torch.abs(output_triton - output_pytorch).max()}"
+    )
 
+    print("✅ Success: Outputs match!")
     print(f"\nTriton Output Shape: {output_triton.shape}")
     print(f"PyTorch Output Shape: {output_pytorch.shape}")
+
+
+# if __name__ == "__main__":
+#     test()
